@@ -108,50 +108,113 @@
 		return () => { clearInterval(clock); stop(); };
 	});
 </script>
+
 <svelte:head><title>Services · CloudWiki Admin</title></svelte:head>
-<div class="page-heading"><div><h1>Services</h1><p>Production host services and Compose containers</p></div><span class="status" class:warn={stale} class:good={!stale}>{stale ? 'Stale data' : 'Live'}</span></div>
+<div class="page-heading">
+	<div><h1>Services</h1><p>Updated {time(services?.collectedAt)}</p></div>
+	{#if stale}<span class="status warn">Stale data</span>{/if}
+</div>
 {#if failure}<div class="notice" role="status">{failure}</div>{/if}
-{#if services?.errors.length}<div class="notice" role="status">{#each services.errors as message}<p>{message}</p>{/each}</div>{/if}
-{#if activeOperations.length}<div class="notice" role="status">A restart is {activeOperations[0].status}. Further restarts are available after it finishes.</div>{/if}
-<p class="collection muted">Last collected {time(services?.collectedAt)} · updates every 10 seconds</p>
+{#if services?.errors.length}
+	<div class="notice" role="status">{#each services.errors as message}<p>{message}</p>{/each}</div>
+{/if}
+{#if activeOperations.length}
+	<div class="notice" role="status">Restart {activeOperations[0].status} for {activeOperations[0].target.replace(/^(unit:|container:)/, '')}.</div>
+{/if}
+
 {#each serviceKinds as kind}
-	<section class="service-section"><h2>{kind === 'host' ? 'Host services' : 'Production containers'}</h2>
-		<div class="table-wrap card"><table><thead><tr>
-			{#each columns as column}
-				<th class="sortable" scope="col" aria-sort={sorts[kind].key === column.key ? sorts[kind].direction : 'none'}>
-					<button type="button" onclick={() => changeSort(kind, column.key)} aria-label={`Sort by ${column.label}, ${sorts[kind].key === column.key && sorts[kind].direction === 'ascending' ? 'descending' : 'ascending'}`}>
-						{column.label}{#if sorts[kind].key === column.key}<span class="sort-direction" aria-hidden="true">{sorts[kind].direction === 'ascending' ? 'Asc' : 'Desc'}</span>{/if}
-					</button>
-				</th>
-			{/each}
-			<th scope="col"><span class="sr-only">Actions</span></th>
-		</tr></thead><tbody>
-		{#each sortedServices[kind] as service (service.target)}
-			<tr><td><strong>{service.name}</strong>{#if service.detail}<span class="muted detail">{service.detail}</span>{/if}</td><td><span class="status" class:good={['active','running'].includes(service.state)} class:bad={['failed','exited','dead','missing'].includes(service.state)} class:warn={['unknown','ambiguous','restarting','paused'].includes(service.state)}>{service.state}</span></td><td><span class:healthy={service.health === 'healthy'} class:unhealthy={service.health === 'unhealthy'}>{healthLabel(service)}</span></td><td>{duration(service.uptimeSeconds)}</td><td>{service.restarts ?? 'Unavailable'}</td><td>{percent(service.cpuPercent)}</td><td>{bytes(service.memoryBytes)}</td><td><button disabled={!service.restartable || !canRestart} onclick={() => choose(service)} aria-label={`Restart ${service.name}`}>Restart</button></td></tr>
-		{:else}<tr><td colspan="8" class="muted">Awaiting service inventory</td></tr>{/each}
-		</tbody></table></div>
+	<section class="service-section">
+		<h2>{kind === 'host' ? 'Host services' : 'Production containers'}</h2>
+		<div class="table-wrap">
+			<table>
+				<caption class="sr-only">A dash in the health column means no health check is configured.</caption>
+				<thead><tr>
+					{#each columns as column}
+						<th class="sortable" scope="col" aria-sort={sorts[kind].key === column.key ? sorts[kind].direction : 'none'}>
+							<button type="button" onclick={() => changeSort(kind, column.key)} aria-label={`Sort by ${column.label}, ${sorts[kind].key === column.key && sorts[kind].direction === 'ascending' ? 'descending' : 'ascending'}`}>
+								{column.label}
+								{#if sorts[kind].key === column.key}<span class="sort-direction" aria-hidden="true">{sorts[kind].direction === 'ascending' ? 'Asc' : 'Desc'}</span>{/if}
+							</button>
+						</th>
+					{/each}
+					<th scope="col"><span class="sr-only">Actions</span></th>
+				</tr></thead>
+				<tbody>
+					{#each sortedServices[kind] as service (service.target)}
+						<tr>
+							<td><strong>{service.name}</strong>{#if service.detail && service.detail !== 'running' && service.detail !== service.state}<span class="muted detail">{service.detail}</span>{/if}</td>
+							<td><span class="status" class:good={['active','running'].includes(service.state)} class:bad={['failed','exited','dead','missing'].includes(service.state)} class:warn={['unknown','ambiguous','restarting','paused'].includes(service.state)}>{service.state}</span></td>
+							<td><span title={healthLabel(service)} class:healthy={service.health === 'healthy'} class:unhealthy={service.health === 'unhealthy'}>{!service.health && !['unknown','missing','ambiguous'].includes(service.state) ? '—' : healthLabel(service)}</span></td>
+							<td>{duration(service.uptimeSeconds)}</td>
+							<td>{service.restarts ?? 'Unavailable'}</td>
+							<td>{percent(service.cpuPercent)}</td>
+							<td>{bytes(service.memoryBytes)}</td>
+							<td class="row-action"><button class="quiet" disabled={!service.restartable || !canRestart} onclick={() => choose(service)} aria-label={`Restart ${service.name}`}>Restart</button></td>
+						</tr>
+					{:else}<tr><td colspan="8" class="muted">Awaiting service inventory</td></tr>{/each}
+				</tbody>
+			</table>
+		</div>
 	</section>
 {/each}
-<p class="muted collection">CPU usage is measured per core and can exceed 100%. Missing or ambiguous containers require deployment repair.</p>
-<section class="service-section"><h2>Restart history</h2><p class="muted collection">Operations retained for 30 days · showing the most recent 50</p>
-<div class="table-wrap card"><table><thead><tr><th>Requested</th><th>Target</th><th>Operator Discord ID</th><th>Status</th><th>Result</th></tr></thead><tbody>
-{#each operations as operation (operation.id)}<tr><td>{time(operation.created)}<span class="muted detail">{operation.id}</span></td><td>{operation.target}</td><td>{operation.actor}</td><td><span class="status" class:good={operation.status === 'succeeded'} class:bad={operation.status === 'failed'} class:warn={['queued','running'].includes(operation.status)}>{operation.status}</span></td><td>{operation.result || 'Waiting for restart command to finish'}{#if operation.started}<span class="muted detail">Started {time(operation.started)}</span>{/if}{#if operation.finished}<span class="muted detail">Finished {time(operation.finished)}</span>{/if}</td></tr>
-{:else}<tr><td colspan="5" class="muted">No restart operations recorded</td></tr>{/each}
-</tbody></table></div></section>
-<dialog bind:this={dialog} class="modal card" aria-labelledby="restart-title" oncancel={(event) => { if (submitting) event.preventDefault(); else selected = null; }}>
+<p class="muted footnote">CPU is measured per core and can exceed 100%.</p>
+
+{#if operations.length}
+	<details class="history" open={activeOperations.length > 0 || operations[0]?.status === 'failed'}>
+		<summary>Restart history</summary>
+		<div class="table-wrap"><table>
+			<thead><tr><th>Requested</th><th>Target</th><th>Operator</th><th>Status</th><th><span class="sr-only">Details</span></th></tr></thead>
+			<tbody>{#each operations as operation (operation.id)}
+				<tr>
+					<td>{time(operation.created)}</td><td>{operation.target.replace(/^(unit:|container:)/, '')}</td><td>{operation.actor}</td>
+					<td><span class="status" class:good={operation.status === 'succeeded'} class:bad={operation.status === 'failed'} class:warn={['queued','running'].includes(operation.status)}>{operation.status}</span>{#if operation.status === 'failed'}<p class="detail">{operation.result}</p>{/if}</td>
+					<td><details class="operation-detail"><summary>Details</summary><p>{operation.result}</p><code>{operation.id}</code>{#if operation.started}<p class="muted">Started {time(operation.started)}</p>{/if}{#if operation.finished}<p class="muted">Finished {time(operation.finished)}</p>{/if}</details></td>
+				</tr>
+			{/each}</tbody>
+		</table></div>
+	</details>
+{/if}
+
+<dialog bind:this={dialog} class="modal" aria-labelledby="restart-title" oncancel={(event) => { if (submitting) event.preventDefault(); else selected = null; }}>
 	{#if selected}
-		<h2 id="restart-title">Restart {selected.name}?</h2><p>{impact(selected)}</p><p class="muted">The request will run on the host. Its result will appear in restart history.</p>
+		<h2 id="restart-title">Restart {selected.name}?</h2>
+		<p>{impact(selected)}</p>
 		{#if submissionError}<div class="notice" role="alert">{submissionError} Retry submits the same operation ID.</div>{/if}
 		<div class="modal-actions"><button class="quiet" disabled={submitting} onclick={() => { selected = null; }}>Cancel</button><button disabled={submitting || stale || !!failure || activeOperations.length > 0} onclick={submit}>{submitting ? 'Submitting…' : 'Confirm restart'}</button></div>
 	{/if}
 </dialog>
-<style>
-	th.sortable { padding: 0; }
-	th.sortable button { display: flex; align-items: center; gap: .5rem; width: 100%; padding: 1rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; white-space: nowrap; }
-	th.sortable button:hover { color: var(--text); background: #22324a; }
-	th.sortable button:focus-visible { outline-offset: -4px; }
-	.sort-direction { color: var(--accent); font-size: .875rem; font-weight: 600; }
 
-	.collection { font-size: .875rem; }.service-section { margin-top: 2rem; }.service-section > h2 { margin-bottom: 1rem; }.table-wrap { padding: 0; overflow-x: auto; }table { width: 100%; border-collapse: collapse; text-align: left; font-size: .9rem; }th { font-size: .85rem; font-weight: 500; color: var(--muted); background: #172234; }th, td { padding: 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }tr:last-child td { border: 0; }td strong { font-weight: 550; }.detail { display: block; margin-top: .3rem; font-size: .8rem; overflow-wrap: anywhere; max-width: 24rem; }.healthy { color: #a2e6c6; }.unhealthy { color: #ffb3ad; }td button { font-size: .85rem; }
-	.modal::backdrop { background: #020711ce; }.modal { color: var(--text); margin: auto; width: min(100%, 32rem); box-shadow: 0 20px 70px #0008; }.modal p { line-height: 1.65; }.modal-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.5rem; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+<style>
+	.service-section { margin-top: 1.75rem; }
+	.service-section > h2 { margin-bottom: .8rem; }
+	.table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
+	table { width: 100%; border-collapse: collapse; text-align: left; font-size: .875rem; }
+	th { font-weight: 400; color: var(--muted); }
+	th, td { padding: .7rem .75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+	th:first-child, td:first-child { padding-left: 0; }
+	th:last-child, td:last-child { padding-right: 0; }
+	th.sortable { padding: 0; }
+	th.sortable button { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .7rem .75rem; border: 0; border-radius: 0; color: inherit; text-align: left; white-space: nowrap; }
+	th.sortable:first-child button { padding-left: 0; }
+	th.sortable button:hover { color: var(--text); background: transparent; }
+	th.sortable button:focus-visible { outline-offset: -3px; }
+	th[aria-sort='ascending'], th[aria-sort='descending'] { color: var(--text); }
+	.sort-direction { color: var(--muted); font-size: .875rem; }
+	td strong { font-weight: 500; }
+	.detail { display: block; margin: .25rem 0 0; font-size: .875rem; overflow-wrap: anywhere; max-width: 28rem; }
+	.healthy { color: #a4cdb9; }
+	.unhealthy { color: #e5aaa5; }
+	.row-action { text-align: right; }
+	.footnote { font-size: .875rem; margin: .8rem 0 0; }
+	.history { margin-top: 2rem; }
+	.history > summary { cursor: pointer; padding: .75rem 0; font-size: .875rem; }
+	.operation-detail { min-width: 5rem; max-width: 28rem; font-size: .875rem; }
+	.operation-detail summary { cursor: pointer; color: var(--muted); }
+	.operation-detail code { overflow-wrap: anywhere; }
+	.operation-detail p { margin: .5rem 0; }
+	.modal { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1.5rem; width: min(calc(100% - 2rem), 30rem); max-height: calc(100dvh - 2rem); margin: auto; }
+	.modal::backdrop { background: #0009; }
+	.modal p { line-height: 1.65; }
+	.modal-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.5rem; }
+	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>

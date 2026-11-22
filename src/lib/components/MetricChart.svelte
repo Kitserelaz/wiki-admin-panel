@@ -22,7 +22,7 @@
 	}
 </script>
 <section class="chart card" aria-label={`${title}, last 24 hours`}>
-	<div class="chart-title"><h2>{title}</h2><span class="muted">{rate ? `${bytes(maximum)}/s` : '100%'} max</span></div>
+	<div class="chart-title"><h2>{title}</h2><span class="muted">{rate ? `${bytes(maximum)}/s` : '100%'}</span></div>
 	{#if available}
 		<svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} five-minute averages over 24 hours. Gaps indicate unavailable data.`}>
 			{#each [0.25, 0.5, 0.75] as fraction}<line x1="0" x2={width} y1={height * fraction} y2={height * fraction} stroke="var(--border)" />{/each}
@@ -31,11 +31,15 @@
 			{/each}
 		</svg>
 	{:else}<div class="empty-chart">Collecting history</div>{/if}
-	<div class="chart-footer"><span>24 hours ago</span><div>{#each series as line}<span class="legend" style:color={line.color}>{line.label}</span>{/each}</div><span>Now</span></div>
+	<div class="chart-footer"><span>24 hours ago</span>{#if series.length > 1}<div>{#each series as line}<span class="legend" style:color={line.color}>{line.label}</span>{/each}</div>{/if}<span>Now</span></div>
 </section>
 <style>
+	.chart { background: transparent; border: 0; border-radius: 0; padding: 0; }
 	.chart-title, .chart-footer { display: flex; justify-content: space-between; align-items: center; gap: .75rem; }
-	h2 { font-size: 1rem; margin: 0; } svg { width: 100%; display: block; margin: 1.2rem 0 .7rem; overflow: visible; }
-	.chart-footer { font-size: .85rem; color: var(--muted); flex-wrap: wrap; }.legend { margin: 0 .4rem; }
-	.empty-chart { height: 150px; display: grid; place-items: center; color: var(--muted); }
+	h2 { font-size: .875rem; font-weight: 500; margin: 0; }
+	.chart-title > span { font-size: .875rem; }
+	svg { width: 100%; display: block; margin: .9rem 0 .6rem; overflow: visible; }
+	.chart-footer { font-size: .875rem; color: var(--muted); flex-wrap: wrap; }
+	.legend { margin: 0 .4rem; }
+	.empty-chart { height: 150px; display: grid; place-items: center; color: var(--muted); font-size: .875rem; }
 </style>
