@@ -91,7 +91,7 @@ type Container = { id: string; service: string; state: string; started: number |
 async function containers(): Promise<Container[]> {
 	const ids = (await command(['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=cloudwiki-production'])).trim().split(/\s+/).filter(Boolean);
 	if (!ids.length) return [];
-	const template = '{{json .Id}}\t{{json .Config.Labels}}\t{{json .State.Status}}\t{{json .State.StartedAt}}\t{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}\t{{json .RestartCount}}';
+	const template = '{{json .Id}}\t{{json .Config.Labels}}\t{{json .State.Status}}\t{{json .State.StartedAt}}\t{{with (index .State "Health")}}{{json .Status}}{{else}}null{{end}}\t{{json .RestartCount}}';
 	const output = await command(['docker', 'inspect', '--format', template, ...ids]);
 	return output.trim().split('\n').flatMap((line) => {
 		const [id, labels, state, started, health, restarts] = line.split('\t').map((part) => JSON.parse(part));
@@ -133,7 +133,11 @@ async function collectServices(): Promise<ServiceSnapshot> {
 	}));
 	let discovered: Container[] | null = null;
 	const stats = new Map<string, { CPUPerc: string; MemUsage: string }>();
-	try { discovered = await containers(); } catch { errors.push('Docker inventory unavailable'); }
+	try { discovered = await containers(); } catch (cause) {
+		errors.push('Docker inventory unavailable');
+		const failure = cause as { killed?: boolean; stderr?: string };
+		console.warn('Docker inventory collection failed:', failure.killed ? 'command timed out' : failure.stderr?.trim().slice(0, 1000) || 'command or output parsing failed');
+	}
 	const running = discovered?.filter((container) => container.state === 'running').map((container) => container.id) || [];
 	if (running.length) {
 		try {
