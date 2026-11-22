@@ -191,12 +191,15 @@ async function buildPanel(current: DeploymentJob, local = false) {
 	const clean = ['runuser', '-u', 'wiki-admin-build', '--', 'env', '-i', 'HOME=/var/cache/wiki-admin-build', 'PATH=/opt/bun/bun-linux-x64:/usr/bin:/bin', 'BUN_INSTALL_CACHE_DIR=/var/cache/wiki-admin-build/cache'];
 	const source = `${workspace}/source`;
 	const output = `${workspace}/build`;
+	const buildConfig = `${workspace}/vite.config.mts`;
+	writeFileSync(buildConfig, readFileSync('/opt/wiki-admin-panel-deployment/vite.config.mts'));
+	chmodSync(buildConfig, 0o644);
 	try {
 		await run([...clean, 'git', '-c', 'safe.directory=/opt/wiki-admin-panel', '-c', 'safe.directory=/opt/wiki-admin-panel/.git', 'clone', '--no-hardlinks', '--depth', '1', '--branch', 'main', local ? '/opt/wiki-admin-panel' : 'https://github.com/Kitserelaz/wiki-admin-panel.git', source], { id: current.id, label: 'Preparing the exact panel source' });
 		const cloned = (await run([...clean, 'git', '-C', source, 'rev-parse', 'HEAD'])).trim();
 		if (cloned !== commit) throw new Error('Source changed before build; check updates again');
 		await run([...clean, bun, 'install', '--frozen-lockfile'], { cwd: source, id: current.id, label: 'Installing build dependencies', timeout: 600000 });
-		await run([...clean, `CLOUDWIKI_BUILD_SOURCE=${source}`, `CLOUDWIKI_BUILD_OUTPUT=${output}`, bun, '--bun', `${source}/node_modules/vite/bin/vite.js`, 'build', '--config', '/opt/wiki-admin-panel-deployment/vite.config.mts', '--configLoader', 'native'], { cwd: source, id: current.id, label: 'Building the production panel', timeout: 600000 });
+		await run([...clean, `CLOUDWIKI_BUILD_SOURCE=${source}`, `CLOUDWIKI_BUILD_OUTPUT=${output}`, bun, '--bun', `${source}/node_modules/vite/bin/vite.js`, 'build', '--config', buildConfig, '--configLoader', 'native'], { cwd: source, id: current.id, label: 'Building the production panel', timeout: 600000 });
 		const release = `${releases}/${current.id}`;
 		await run(['cp', '-a', '--', output, release]);
 		await run(['chown', '-hR', 'root:root', '--', release]);

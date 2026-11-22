@@ -28,6 +28,11 @@
 	let releases = $derived(application === 'panel' ? summary?.panel.releases || [] : summary?.mediawiki.releases || []);
 	let history = $derived(summary?.jobs.filter((job) => job.application === application) || []);
 	let blocked = $derived(application === 'mediawiki' && (!!summary?.mediawiki.sourceEdits || summary?.mediawiki.configuration?.status !== 'clean'));
+	let alreadyDeployed = $derived(!!update && (application === 'panel'
+		? summary?.panel.commit === update.commit
+		: update.artifact === 'dashboard-manifest'
+			? summary?.mediawiki.dashboardCommit === update.commit
+			: summary?.mediawiki.sourceCommit === update.commit && summary?.mediawiki.lastSuccess === update.commit && ['php', 'web', 'counter'].every((service) => summary?.mediawiki.images?.[service] === update.commit)));
 	let selectedPaths = $derived(review?.files.filter((file) => selectedFiles.includes(file.id)).map((file) => file.path) || []);
 	$effect(() => {
 		if (confirmation && dialog && !dialog.open) dialog.showModal();
@@ -144,7 +149,7 @@
 	</section>
 	<section class="card"><div class="section-header"><h2>Available update</h2><button disabled={!ready} onclick={() => quick('check_updates')}>Check for updates</button></div>
 		{#if update}<p class="commit">{short(update.commit)}</p><p>{update.message}</p><p class="muted small">Checked {time(update.checkedAt)}</p>{#if update.error}<p class="notice">{update.error}</p>{/if}{#if application === 'mediawiki'}<p class="muted">{update.ciReady ? 'Successful CI release available' : 'A successful, unexpired CI release is required'}</p>{/if}
-		<button disabled={!ready || (application === 'mediawiki' && update.artifact === 'dashboard-manifest' ? summary?.mediawiki.dashboardCommit : current) === update.commit || blocked || (application === 'mediawiki' && (!summary?.githubConfigured || !update.ciReady))} onclick={deploy}>Deploy this commit</button>
+		<button disabled={!ready || alreadyDeployed || blocked || (application === 'mediawiki' && (!summary?.githubConfigured || !update.ciReady))} onclick={deploy}>Deploy this commit</button>
 		{:else}<p class="muted">Check GitHub to discover the latest main commit.</p>{/if}
 	</section>
 </div>
