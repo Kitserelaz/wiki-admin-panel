@@ -434,6 +434,36 @@ def publish_source(body, actor):
     return {'message': 'Selected source edits published to main', 'commit': commit, 'files': paths}
 
 
+
+def rollback_problem(record, settings, source_commit, guard):
+    if settings is None:
+        return 'Runtime compatibility information unavailable'
+    commit = record['commit']
+    if not isinstance(commit, str) or not re.fullmatch(r'[a-f0-9]{40}', commit):
+        return 'Recorded commit is invalid'
+    try:
+        git('cat-file', '-e', commit + '^{commit}')
+    except subprocess.CalledProcessError:
+        return 'Recorded application source is unavailable'
+    if settings.get('MW_NUMERIC_WIKI_IDS') == '1':
+        try:
+            git('cat-file', '-e', commit + ':docker/mediawiki/wiki-identity.php')
+        except subprocess.CalledProcessError:
+            return 'Predates the numeric wiki ID migration'
+    mode = settings.get('MW_CODE_MODE', 'image')
+    if record.get('code_mode', 'image') != mode:
+        return 'Uses a different application deployment mode'
+    if mode == 'bind':
+        strategy = settings.get('MW_BIND_STRATEGY', 'versioned')
+        if record.get('bind_strategy') != strategy:
+            return 'Uses a different source deployment layout'
+        if strategy != 'live' and not (FARM / 'releases' / commit / 'release.json').is_file():
+            return 'Retained application source is unavailable'
+    if not guard.rollback_approved(FARM, commit, source_commit):
+        return 'Compatibility approval required'
+    return None
+
+
 def overview():
     result = {'sourceCommit': git('rev-parse', 'HEAD').decode().strip(), 'sourceEdits': 0,
               'configuration': {'status': 'unavailable', 'files': []}, 'releases': [], 'images': {}}
@@ -444,14 +474,20 @@ def overview():
     except Exception:
         result['configuration']['message'] = 'Configuration inventory unavailable or invalid'
     guard = guard_module()
+    settings = None
+    try:
+        resolved = run(['python3', 'scripts/compose', '--env-file', str(ROOT / '.env.production'), 'config', '--environment']).decode()
+        settings = dict(line.split('=', 1) for line in resolved.splitlines() if '=' in line)
+    except Exception:
+        pass
     for path in sorted((FARM / 'history').glob('deploy-*.json'), reverse=True):
         try:
             record = json.loads(path.read_text())
             commit = record['commit']
-            eligible = guard.rollback_approved(FARM, commit, result['sourceCommit'])
+            reason = rollback_problem(record, settings, result['sourceCommit'], guard)
             result['releases'].append({'id': path.stem, 'commit': commit,
-                'created': int(path.stat().st_mtime), 'rollbackEligible': eligible,
-                'reason': 'Compatibility approval required' if not eligible else None})
+                'created': int(path.stat().st_mtime), 'rollbackEligible': reason is None,
+                'reason': reason})
         except (OSError, ValueError, KeyError):
             continue
     try:
