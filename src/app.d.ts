@@ -3,7 +3,7 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals { operator: import('#lib/server/auth.ts').Operator | null }
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

@@ -1,56 +1,27 @@
-# sv
+# CloudWiki admin panel
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit panel with Discord OAuth sign-in restricted to explicitly allowed Discord user IDs.
 
-## Creating a project
+## Configuration
 
-If you're seeing this, you've probably already done this step. Congrats!
+Copy `.env.example` to `.env` for development. Set `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and the comma-separated `DISCORD_ALLOWED_USER_IDS`. The names `CLIENT_ID` and `CLIENT_SECRET` are also supported for existing configurations. IDs are parsed as strings. Missing credentials or an empty or malformed allowlist disables sign-in.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+Register `https://admin.cloudwiki.us/auth/discord/callback` in the Discord application's OAuth2 redirect list. For local development, also register `http://localhost:5173/auth/discord/callback`.
 
-To recreate this project with the same configuration:
+Only the `identify` scope is requested. Every protected request checks the session and current allowlist. Sessions expire after eight hours and are cleared when the server restarts. Sign-out deletes the server-side session. Production cookies are Secure, HttpOnly, and SameSite=Lax.
 
-```sh
-# recreate this project
-bun x sv@1.7.0 create --template minimal --types ts --install bun .
-```
-
-## Adding features
-
-Add features to your project with `sv add`:
+## Development
 
 ```sh
-npx sv add
+bun install --frozen-lockfile
+bun run dev
+bun run check
+bun test
+bun run build
 ```
 
-For example, to add Tailwind CSS:
+## Production
 
-```sh
-npx sv add tailwindcss
-```
+Bun runs the Node adapter build under `wiki-admin-panel.service`. Production loads root-owned `/etc/wiki-admin-panel.env` through systemd's `EnvironmentFile`. Set `ORIGIN=https://admin.cloudwiki.us` and `NODE_ENV=production` in the service environment.
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+The host's external deployment configuration at `/var/lib/cloudwiki/admin/vite.config.mts` selects `adapter-node` and writes `/opt/wiki-admin-panel-build`. The checkout stays at `/opt/wiki-admin-panel`. Restart the service after deploying a build or changing its environment file.
