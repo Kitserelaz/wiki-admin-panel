@@ -192,7 +192,7 @@ async function buildPanel(current: DeploymentJob, local = false) {
 	const source = `${workspace}/source`;
 	const output = `${workspace}/build`;
 	try {
-		await run([...clean, 'git', '-c', 'safe.directory=/opt/wiki-admin-panel', 'clone', '--no-hardlinks', '--depth', '1', '--branch', 'main', local ? '/opt/wiki-admin-panel' : 'https://github.com/Kitserelaz/wiki-admin-panel.git', source], { id: current.id, label: 'Preparing the exact panel source' });
+		await run([...clean, 'git', '-c', 'safe.directory=/opt/wiki-admin-panel', '-c', 'safe.directory=/opt/wiki-admin-panel/.git', 'clone', '--no-hardlinks', '--depth', '1', '--branch', 'main', local ? '/opt/wiki-admin-panel' : 'https://github.com/Kitserelaz/wiki-admin-panel.git', source], { id: current.id, label: 'Preparing the exact panel source' });
 		const cloned = (await run([...clean, 'git', '-C', source, 'rev-parse', 'HEAD'])).trim();
 		if (cloned !== commit) throw new Error('Source changed before build; check updates again');
 		await run([...clean, bun, 'install', '--frozen-lockfile'], { cwd: source, id: current.id, label: 'Installing build dependencies', timeout: 600000 });
