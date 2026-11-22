@@ -1,0 +1,31 @@
+[Unit]
+Description=CloudWiki deployment and resolution worker (Bun)
+After=cloudwiki-admin-agent.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/cloudwiki-deployment
+ExecStart=/opt/bun/bun-linux-x64/bun /usr/local/libexec/cloudwiki-deployment-worker.js
+Environment=PATH=/usr/bin:/bin
+Restart=on-failure
+RestartSec=5
+StateDirectory=cloudwiki-deployment
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryMax=1G
+TasksMax=256
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

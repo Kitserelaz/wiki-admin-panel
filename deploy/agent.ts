@@ -1,5 +1,6 @@
 /** Root-owned host agent. Only its Unix socket is reachable by the panel. */
 import { Database } from 'bun:sqlite';
+import { initializeDeployments, state as deploymentState, jobs as deploymentJobs, job as deploymentJob, enqueueDeployment, DeploymentError } from './deployment-store.ts';
 import { readFileSync, existsSync, statfsSync, chmodSync, chownSync, unlinkSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS operations (
  id TEXT PRIMARY KEY, actor TEXT NOT NULL, target TEXT NOT NULL, status TEXT NOT NULL,
  created INTEGER NOT NULL, started INTEGER, finished INTEGER, result TEXT
 );`);
+initializeDeployments(db);
 const seconds = () => Math.floor(Date.now() / 1000);
 db.query("UPDATE operations SET status='failed', finished=?, result='Agent stopped during execution. Inspect the target before retrying.' WHERE status='running'").run(seconds());
 const snapshot: Snapshot = { host: null, services: null };
@@ -216,6 +218,9 @@ const enqueue = db.transaction((body: Record<string, unknown>) => {
 		if (existing.actor !== actor || existing.target !== target) throw new RequestError(409, 'Operation ID belongs to another request');
 		return existing;
 	}
+	if (deploymentState(db, 'deployment:maintenance')) throw new RequestError(503, 'Deployment services are being installed');
+	const deployments = db.query("SELECT COUNT(*) AS n FROM deployment_jobs WHERE status IN ('queued','running')").get() as { n: number };
+	if (deployments.n) throw new RequestError(409, 'A deployment operation is queued or running');
 	const count = db.query("SELECT COUNT(*) AS count FROM operations WHERE status IN ('queued','running')").get() as { count: number };
 	if (count.count >= 20) throw new RequestError(429, 'Restart queue is full');
 	db.query('INSERT INTO operations (id,actor,target,status,created) VALUES (?,?,?,?,?)').run(id, actor, target, 'queued', seconds());
@@ -232,11 +237,11 @@ async function restartLoop() {
 		try {
 			if (!targets.has(next.target)) throw new Error('Unsupported restart target');
 			if (next.target.startsWith('unit:')) {
-				await command(['systemctl', 'restart', next.target.slice(5)], 120000);
+				await command(['flock', '-n', '/var/lib/cloudwiki/deploy.lock', 'systemctl', 'restart', next.target.slice(5)], 120000);
 			} else {
 				const matches = (await containers()).filter((container) => container.service === next.target.slice(10));
 				if (matches.length !== 1) throw new Error('Missing or ambiguous container');
-				await command(['docker', 'restart', '--timeout', '30', matches[0].id], 90000);
+				await command(['flock', '-n', '/var/lib/cloudwiki/deploy.lock', 'docker', 'restart', '--timeout', '30', matches[0].id], 90000);
 			}
 		} catch (error) {
 			status = 'failed';
@@ -252,11 +257,32 @@ async function restartLoop() {
 if (existsSync(socketPath)) unlinkSync(socketPath);
 const server = Bun.serve({
 	unix: socketPath,
-	maxRequestBodySize: 4096,
+	maxRequestBodySize: 65536,
 	async fetch(request) {
 		try {
-			const path = new URL(request.url).pathname;
+			const url = new URL(request.url);
+			const path = url.pathname;
 			if (request.method === 'GET') {
+				if (path === '/deployments') {
+					const summary = deploymentState<any>(db, 'deployment:summary') || { collectedAt: 0, githubConfigured: false, panel: { commit: null, releases: [] }, mediawiki: {}, updates: {} };
+					const heartbeat = deploymentState<number>(db, 'deployment:heartbeat') || 0;
+					return Response.json({ ...summary, jobs: deploymentJobs(db), maintenance: !!deploymentState(db, 'deployment:maintenance'), workerActive: seconds() - heartbeat < 45 });
+				}
+				if (/^\/deployments\/jobs\/[a-f0-9-]{36}(?:\/log)?$/.test(path)) {
+					const id = path.split('/')[3];
+					const found = deploymentJob(db, id);
+					if (!found) throw new RequestError(404, 'Deployment operation not found');
+					if (path.endsWith('/log')) {
+						const row = db.query('SELECT log FROM deployment_jobs WHERE id=?').get(id) as { log: string };
+						return Response.json({ text: row.log.slice(-256 * 1024), truncated: row.log.length >= 256 * 1024 });
+					}
+					return Response.json(found);
+				}
+				if (/^\/deployments\/reviews\/[a-f0-9-]{36}$/.test(path)) {
+					const row = db.query('SELECT data FROM deployment_reviews WHERE id=?').get(path.split('/')[3]) as { data: string } | null;
+					if (!row) throw new RequestError(404, 'Review expired or unavailable');
+					return Response.json(JSON.parse(row.data));
+				}
 				if (path === '/snapshot') return Response.json(snapshot);
 				if (path === '/history') return Response.json(history());
 				if (path === '/operations') return Response.json({ operations: db.query('SELECT * FROM operations ORDER BY created DESC,rowid DESC LIMIT 50').all() });
@@ -266,6 +292,14 @@ const server = Bun.serve({
 					return Response.json(found);
 				}
 			}
+			if (request.method === 'POST' && path === '/deployments') {
+				const heartbeat = deploymentState<number>(db, 'deployment:heartbeat') || 0;
+				if (seconds() - heartbeat > 45) throw new RequestError(503, 'Deployment worker is unavailable');
+				let body;
+				try { body = await request.json(); } catch { throw new RequestError(400, 'Invalid request body'); }
+				if (!body || typeof body !== 'object' || Array.isArray(body) || body.confirmed !== true) throw new RequestError(400, 'Confirmed operation required');
+				return Response.json(enqueueDeployment(db, body), { status: 202 });
+			}
 			if (request.method === 'POST' && path === '/operations') {
 				let body;
 				try { body = await request.json(); } catch { throw new RequestError(400, 'Invalid request body'); }
@@ -274,7 +308,7 @@ const server = Bun.serve({
 			}
 			throw new RequestError(404, 'Unknown agent endpoint');
 		} catch (error) {
-			if (error instanceof RequestError) return Response.json({ message: error.message }, { status: error.status });
+			if (error instanceof RequestError || error instanceof DeploymentError) return Response.json({ message: error.message }, { status: error.status });
 			console.error('Agent request failed');
 			return Response.json({ message: 'Host agent unavailable' }, { status: 503 });
 		}

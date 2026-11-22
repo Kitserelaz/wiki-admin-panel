@@ -12,6 +12,7 @@
 		<nav aria-label="Administration">
 			<a class:active={page.url.pathname === '/'} href="/" aria-current={page.url.pathname === '/' ? 'page' : undefined}>Host health</a>
 			<a class:active={page.url.pathname === '/services'} href="/services" aria-current={page.url.pathname === '/services' ? 'page' : undefined}>Services</a>
+			<a class:active={page.url.pathname === '/deployments'} href="/deployments" aria-current={page.url.pathname === '/deployments' ? 'page' : undefined}>Deployments</a>
 		</nav>
 		<div class="identity"><span class="muted">Signed in with Discord</span><strong>{data.operator.username}</strong><form method="POST" action="/auth/logout"><button class="quiet" type="submit">Sign out</button></form></div>
 	</aside>

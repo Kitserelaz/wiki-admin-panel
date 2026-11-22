@@ -42,3 +42,24 @@ sudo sh deploy/deploy-panel.sh
 Run the agent installer again after changing the production service inventory. The panel deployer builds into a staging directory, retains the previous build, and restarts the Bun service. Automatic deployments remain disabled. Restarting the panel clears login sessions. Running agent operations interrupted by an agent restart are marked failed with an uncertain outcome and require inspection before retrying.
 
 Functional acceptance scenarios are documented in `docs/ACCEPTANCE.md` and remain unexecuted.
+
+## Deployment history and resolution controls
+
+The Deployments page separates the panel from the MediaWiki farm. Operators explicitly check for updates and confirm release activation, rollback, baseline acceptance, source publishing, or archive-and-discard actions.
+
+The Bun deployment worker runs independently of the panel and uses the agent's root-only SQLite database. GitHub App configuration lives in `/etc/cloudwiki-deployment/github.json` with `appId`, `installationId`, and an absolute `privateKeyFile` inside that root-only directory. Both JSON and PEM must be owned by root with mode `600`. The App needs repository access to `Kitserelaz/mediawiki-www`, Contents write, Actions write, and Workflows write for publishing workflow changes. Tokens are short-lived and stay in the worker.
+
+Install the reviewed deployment controller and build a stamped initial release from the production checkout:
+
+```sh
+sudo sh deploy/install-deployments.sh
+sudo sh deploy/deploy-panel.sh
+```
+
+Subsequent deployments initiated in the UI build the exact latest panel main commit in a separate workspace under `wiki-admin-build`. The fixed controller activates artifacts under `/opt/wiki-admin-panel-releases`. `/opt/wiki-admin-panel-build` becomes the active-release symlink. The last five successful builds are retained, along with the active and previous builds. Existing unstamped directories remain legacy entries.
+
+MediaWiki dispatch reuses `.github/workflows/deploy.yml` in `mediawiki-www`. Its existing production-environment SSH credentials and workflow token are used for server access and registry pulls. Recorded farm rollbacks require the existing operator-authored compatibility policy. An App token never reaches a dependency installation or application build.
+
+Configuration and source reviews expire after 30 minutes. Pending published-source reconciliation can use its retained review for up to 30 days. Configuration credentials stay metadata-only in the UI. Source credential files, symlinks, and non-file entries require SSH review. Source publication requires production HEAD to match remote main and uses a fast-forward push. Archived discarded edits and baseline backups live under `/var/lib/cloudwiki-deployment` for 30 days, accessible through SSH.
+
+A source recovery archive includes a manifest mapping selected paths to files, their original mode and HEAD, plus staged-state recovery data. Restore selected files and staged entries deliberately from SSH, preserving unrelated live edits. Recompute deployment blockers after any recovery.

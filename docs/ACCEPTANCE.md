@@ -28,3 +28,28 @@ Functional acceptance remains pending. These scenarios have not been executed, f
 ## Deployment records
 
 Record the pushed revision, Bun build outcome, agent unit installation, panel service restart outcome, and retained rollback build. Starting services and compiling production artifacts are deployment steps. Functional verification and simulated outages remain deferred.
+
+## Deployment and blocker-resolution scenarios
+
+These scenarios remain unexecuted.
+
+- Panel revision is read from the activated artifact's stamped release metadata, including after rollback. The checkout's revision is shown independently where appropriate.
+- MediaWiki live source, PHP/web/counter image revisions, and the last recorded successful release remain distinguishable.
+- Check for updates fetches the latest main revision on demand. No timer or background GitHub polling is installed.
+- Missing or insufficient GitHub App permissions produce an operation failure without exposing the private key, installation token, or Discord secret.
+- Manual farm deployments select the exact successful main-push CI run and an unexpired release artifact. A superseded selection requires a new review.
+- Panel dependency installation and compilation run under the dedicated build account with an environment excluding application credentials.
+- Failed builds preserve the active artifact. Interrupted activation recovers the journaled prior artifact. Activation ends panel sessions while operation records persist.
+- Duplicate operation IDs return the original operation and never dispatch another workflow. A worker restart resumes an already-dispatched farm workflow by operation ID.
+- An uncertain workflow-dispatch outcome is displayed explicitly and requires inspection before a new submission.
+- Panel rollback selects a stamped successful retained artifact. Legacy unstamped directories remain informational. The active and previous artifacts are protected during retention.
+- Farm rollback requires a trusted release record, exact reviewed current/target commits, and an explicit existing compatibility approval. No SQL or data-volume restoration is performed.
+- Configuration acceptance updates only selected file fingerprints. Concurrent changes invalidate the review. Every previous baseline is archived before replacement.
+- Initialization of a missing or malformed baseline requires complete-inventory confirmation. A retained valid baseline can be restored, leaving remaining drift visible.
+- Source reviews include staged, unstaged, deleted, renamed, and untracked MediaWiki changes. Credential-bearing paths receive metadata-only presentation and require SSH review.
+- Publication preserves unselected source and index state. Remote divergence or a rejected push leaves live edits intact. A successful push triggers the existing farm pipeline.
+- A published commit with incomplete production synchronization is recorded as requiring reconciliation. Reconciliation uses the existing publication rather than creating another commit.
+- Discard archives selected original file contents, modes, original HEAD, and staged state before restoration or removal. A failed archive prevents discard.
+- Source mutation pauses the running live editor and restores its prior running state after either outcome.
+- Restart, deployment, and resolution operations respect the farm lock. User-supplied shell commands, repository URLs, filesystem paths, and GitHub credentials are not accepted by the APIs.
+- Output is bounded, redacted, and rendered as escaped text. Deployment jobs, review records, and recovery archives retain 30 days.
