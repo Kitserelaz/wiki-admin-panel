@@ -1,0 +1,32 @@
+[Unit]
+Description=CloudWiki host monitoring and restart agent (Bun)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=wiki-admin-panel
+ExecStart=/opt/bun/bun-linux-x64/bun /usr/local/libexec/cloudwiki-admin-agent.js
+Environment=PATH=/usr/bin:/bin
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=cloudwiki-admin-agent
+RuntimeDirectoryMode=0750
+StateDirectory=cloudwiki-admin-agent
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+MemoryMax=192M
+TasksMax=128
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
