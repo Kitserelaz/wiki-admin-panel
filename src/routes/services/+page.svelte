@@ -22,6 +22,50 @@
 	let activeOperations = $derived(operations.filter((operation) => operation.status === 'queued' || operation.status === 'running'));
 	let canRestart = $derived(!stale && !failure && !submitting && activeOperations.length === 0);
 
+	type ServiceKind = Service['kind'];
+	type SortKey = 'name' | 'state' | 'health' | 'uptimeSeconds' | 'restarts' | 'cpuPercent' | 'memoryBytes';
+	type Sort = { key: SortKey; direction: 'ascending' | 'descending' };
+	const serviceKinds: ServiceKind[] = ['host', 'container'];
+	const columns: { key: SortKey; label: string }[] = [
+		{ key: 'name', label: 'Service' },
+		{ key: 'state', label: 'State' },
+		{ key: 'health', label: 'Health' },
+		{ key: 'uptimeSeconds', label: 'Uptime' },
+		{ key: 'restarts', label: 'Auto restarts' },
+		{ key: 'cpuPercent', label: 'CPU' },
+		{ key: 'memoryBytes', label: 'Memory' }
+	];
+	let sorts = $state<Record<ServiceKind, Sort>>({
+		host: { key: 'name', direction: 'ascending' },
+		container: { key: 'name', direction: 'ascending' }
+	});
+	let sortedServices = $derived({ host: sortServices('host'), container: sortServices('container') });
+
+	function healthLabel(service: Service) {
+		if (service.health) return service.health;
+		if (['unknown', 'missing', 'ambiguous'].includes(service.state)) return 'Unavailable';
+		return service.kind === 'host' ? 'Not configured' : 'No health check';
+	}
+	function sortServices(kind: ServiceKind) {
+		const sort = sorts[kind];
+		return (services?.items.filter((service) => service.kind === kind) || []).sort((left, right) => {
+			const a = sort.key === 'health' ? healthLabel(left) : left[sort.key];
+			const b = sort.key === 'health' ? healthLabel(right) : right[sort.key];
+			if (a == null && b != null) return 1;
+			if (b == null && a != null) return -1;
+			let comparison = 0;
+			if (typeof a === 'number' && typeof b === 'number') comparison = a - b;
+			if (typeof a === 'string' && typeof b === 'string') comparison = a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
+			if (comparison) return sort.direction === 'ascending' ? comparison : -comparison;
+			return left.name.localeCompare(right.name, 'en', { numeric: true });
+		});
+	}
+	function changeSort(kind: ServiceKind, key: SortKey) {
+		const current = sorts[kind];
+		sorts[kind] = { key, direction: current.key === key && current.direction === 'ascending' ? 'descending' : 'ascending' };
+	}
+
+
 	function impact(service: Service) {
 		if (service.target === 'unit:docker.service') return 'Restarting Docker can interrupt the entire wiki farm and its running containers.';
 		if (service.target === 'unit:haproxy.service') return 'Restarting HAProxy briefly interrupts public connectivity to the panel and wikis.';
@@ -70,11 +114,20 @@
 {#if services?.errors.length}<div class="notice" role="status">{#each services.errors as message}<p>{message}</p>{/each}</div>{/if}
 {#if activeOperations.length}<div class="notice" role="status">A restart is {activeOperations[0].status}. Further restarts are available after it finishes.</div>{/if}
 <p class="collection muted">Last collected {time(services?.collectedAt)} · updates every 10 seconds</p>
-{#each ['host', 'container'] as kind}
+{#each serviceKinds as kind}
 	<section class="service-section"><h2>{kind === 'host' ? 'Host services' : 'Production containers'}</h2>
-		<div class="table-wrap card"><table><thead><tr><th>Service</th><th>State</th><th>Health</th><th>Uptime</th><th>Auto restarts</th><th>CPU</th><th>Memory</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>
-		{#each services?.items.filter((service) => service.kind === kind) || [] as service (service.target)}
-			<tr><td><strong>{service.name}</strong>{#if service.detail}<span class="muted detail">{service.detail}</span>{/if}</td><td><span class="status" class:good={['active','running'].includes(service.state)} class:bad={['failed','exited','dead','missing'].includes(service.state)} class:warn={['unknown','ambiguous','restarting','paused'].includes(service.state)}>{service.state}</span></td><td><span class:healthy={service.health === 'healthy'} class:unhealthy={service.health === 'unhealthy'}>{service.health || (service.state === 'unknown' ? 'Unavailable' : kind === 'host' ? 'Not configured' : service.state === 'missing' ? 'Unavailable' : 'No health check')}</span></td><td>{duration(service.uptimeSeconds)}</td><td>{service.restarts ?? 'Unavailable'}</td><td>{percent(service.cpuPercent)}</td><td>{bytes(service.memoryBytes)}</td><td><button disabled={!service.restartable || !canRestart} onclick={() => choose(service)} aria-label={`Restart ${service.name}`}>Restart</button></td></tr>
+		<div class="table-wrap card"><table><thead><tr>
+			{#each columns as column}
+				<th class="sortable" scope="col" aria-sort={sorts[kind].key === column.key ? sorts[kind].direction : 'none'}>
+					<button type="button" onclick={() => changeSort(kind, column.key)} aria-label={`Sort by ${column.label}, ${sorts[kind].key === column.key && sorts[kind].direction === 'ascending' ? 'descending' : 'ascending'}`}>
+						{column.label}{#if sorts[kind].key === column.key}<span class="sort-direction" aria-hidden="true">{sorts[kind].direction === 'ascending' ? 'Asc' : 'Desc'}</span>{/if}
+					</button>
+				</th>
+			{/each}
+			<th scope="col"><span class="sr-only">Actions</span></th>
+		</tr></thead><tbody>
+		{#each sortedServices[kind] as service (service.target)}
+			<tr><td><strong>{service.name}</strong>{#if service.detail}<span class="muted detail">{service.detail}</span>{/if}</td><td><span class="status" class:good={['active','running'].includes(service.state)} class:bad={['failed','exited','dead','missing'].includes(service.state)} class:warn={['unknown','ambiguous','restarting','paused'].includes(service.state)}>{service.state}</span></td><td><span class:healthy={service.health === 'healthy'} class:unhealthy={service.health === 'unhealthy'}>{healthLabel(service)}</span></td><td>{duration(service.uptimeSeconds)}</td><td>{service.restarts ?? 'Unavailable'}</td><td>{percent(service.cpuPercent)}</td><td>{bytes(service.memoryBytes)}</td><td><button disabled={!service.restartable || !canRestart} onclick={() => choose(service)} aria-label={`Restart ${service.name}`}>Restart</button></td></tr>
 		{:else}<tr><td colspan="8" class="muted">Awaiting service inventory</td></tr>{/each}
 		</tbody></table></div>
 	</section>
@@ -93,6 +146,12 @@
 	{/if}
 </dialog>
 <style>
+	th.sortable { padding: 0; }
+	th.sortable button { display: flex; align-items: center; gap: .5rem; width: 100%; padding: 1rem; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; white-space: nowrap; }
+	th.sortable button:hover { color: var(--text); background: #22324a; }
+	th.sortable button:focus-visible { outline-offset: -4px; }
+	.sort-direction { color: var(--accent); font-size: .875rem; font-weight: 600; }
+
 	.collection { font-size: .875rem; }.service-section { margin-top: 2rem; }.service-section > h2 { margin-bottom: 1rem; }.table-wrap { padding: 0; overflow-x: auto; }table { width: 100%; border-collapse: collapse; text-align: left; font-size: .9rem; }th { font-size: .85rem; font-weight: 500; color: var(--muted); background: #172234; }th, td { padding: 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }tr:last-child td { border: 0; }td strong { font-weight: 550; }.detail { display: block; margin-top: .3rem; font-size: .8rem; overflow-wrap: anywhere; max-width: 24rem; }.healthy { color: #a2e6c6; }.unhealthy { color: #ffb3ad; }td button { font-size: .85rem; }
 	.modal::backdrop { background: #020711ce; }.modal { color: var(--text); margin: auto; width: min(100%, 32rem); box-shadow: 0 20px 70px #0008; }.modal p { line-height: 1.65; }.modal-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.5rem; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>
