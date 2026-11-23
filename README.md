@@ -45,7 +45,7 @@ Functional acceptance scenarios are documented in `docs/ACCEPTANCE.md` and remai
 
 ## Deployment history and resolution controls
 
-The Deployments page separates the panel from the MediaWiki farm. Operators explicitly check for updates and confirm release activation, rollback, baseline acceptance, source publishing, or archive-and-discard actions.
+The Deployments page separates the panel from the MediaWiki farm. Deploy starts immediately and resolves the latest main commit. Rollback, baseline acceptance, source publishing, and archive-and-discard actions retain their explicit reviews.
 
 The Bun deployment worker runs independently of the panel and uses the agent's root-only SQLite database. GitHub App configuration lives in `/etc/cloudwiki-deployment/github.json` with `appId`, `installationId`, and an absolute `privateKeyFile` inside that root-only directory. Both JSON and PEM must be owned by root with mode `600`. The App needs repository access to `Kitserelaz/mediawiki-www`, Contents write, Actions write, and Workflows write for publishing workflow changes. Tokens are short-lived and stay in the worker.
 
@@ -58,7 +58,7 @@ sudo sh deploy/deploy-panel.sh
 
 Subsequent deployments initiated in the UI build the exact latest panel main commit in a separate workspace under `wiki-admin-build`. The fixed controller activates artifacts under `/opt/wiki-admin-panel-releases`. `/opt/wiki-admin-panel-build` becomes the active-release symlink. The last five successful builds are retained, along with the active and previous builds. Existing unstamped directories remain legacy entries.
 
-MediaWiki dispatch reuses `.github/workflows/deploy.yml` in `mediawiki-www`. Its existing production-environment SSH credentials and workflow token are used for server access and registry pulls. Recorded farm rollbacks require the existing operator-authored compatibility policy. An App token never reaches a dependency installation or application build.
+Native MediaWiki deployment resolves the latest main commit and invokes the fixed local native controller. Deploy starts with one click without a separate update check, confirmation dialog, CI success, or GitHub Actions run. The App token is used only to fetch source; dependency builds run under the limited build account without that token. Failures after database updates require a forward fix. Docker remains the development runtime.
 
 Configuration and source reviews expire after 30 minutes. Pending published-source reconciliation can use its retained review for up to 30 days. Configuration credentials stay metadata-only in the UI. Source credential files, symlinks, and non-file entries require SSH review. Source publication requires production HEAD to match remote main and uses a fast-forward push. Archived discarded edits and baseline backups live under `/var/lib/cloudwiki-deployment` for 30 days, accessible through SSH.
 

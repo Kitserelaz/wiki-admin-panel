@@ -116,16 +116,7 @@ async function checkUpdates(application: Application): Promise<Update> {
 	const repository = repositories[application];
 	const commit = await github(`/repos/${repository}/commits/main`, token);
 	const update: Update = { commit: commit.sha, message: commit.commit.message.split('\n')[0], checkedAt: now() };
-	if (application === 'mediawiki') {
-		const runs = await github(`/repos/${repository}/actions/workflows/docker.yml/runs?branch=main&event=push&head_sha=${commit.sha}&per_page=20`, token);
-		const run = runs.workflow_runs.find((candidate: any) => candidate.head_sha === commit.sha && candidate.head_repository?.full_name === repository && candidate.conclusion === 'success');
-		update.ciReady = false;
-		if (run) {
-			const artifacts = await github(`/repos/${repository}/actions/runs/${run.id}/artifacts`, token);
-			const artifact = artifacts.artifacts.find((candidate: any) => candidate.name === 'release-manifest' && !candidate.expired) || artifacts.artifacts.find((candidate: any) => candidate.name === 'dashboard-manifest' && !candidate.expired);
-			if (artifact) Object.assign(update, { ciReady: true, runId: run.id, artifact: artifact.name });
-		}
-	}
+
 	saveState(db, `update:${application}`, update);
 	return update;
 }
@@ -184,11 +175,11 @@ async function activate(release: string, id: string) {
 async function buildPanel(current: DeploymentJob, local = false) {
 	const requested = current.request.commit;
 	const commit = local ? (await run(['git', '-C', '/opt/wiki-admin-panel', 'rev-parse', 'HEAD'])).trim() : (await checkUpdates('panel')).commit;
-	if (!/^[a-f0-9]{40}$/.test(commit) || (!local && commit !== requested)) throw new Error('Latest main changed; check updates and review the new commit');
+	if (!/^[a-f0-9]{40}$/.test(commit) || (!local && requested && commit !== requested)) throw new Error('Latest main changed; check updates and review the new commit');
 	const workspace = `/var/cache/wiki-admin-build/${current.id}`;
 	mkdirSync(workspace, { mode: 0o700 });
 	await run(['chown', 'wiki-admin-build:wiki-admin-build', workspace]);
-	const clean = ['runuser', '-u', 'wiki-admin-build', '--', 'env', '-i', 'HOME=/var/cache/wiki-admin-build', 'PATH=/opt/bun/bun-linux-x64:/usr/bin:/bin', 'BUN_INSTALL_CACHE_DIR=/var/cache/wiki-admin-build/cache'];
+	const clean = ['systemd-run', '--quiet', '--wait', '--collect', '--pipe', '-p', 'User=wiki-admin-build', '-p', 'MemoryMax=768M', '-p', 'CPUQuota=80%', '-p', 'NoNewPrivileges=yes', 'env', '-i', 'HOME=/var/cache/wiki-admin-build', 'PATH=/opt/bun/bun-linux-x64:/usr/bin:/bin', 'BUN_INSTALL_CACHE_DIR=/var/cache/wiki-admin-build/cache'];
 	const source = `${workspace}/source`;
 	const output = `${workspace}/build`;
 	const buildConfig = `${workspace}/vite.config.mts`;
@@ -313,7 +304,28 @@ async function executeJob(current: DeploymentJob, bootstrap = false) {
 		if (current.action === 'deploy') return await buildPanel(current, bootstrap);
 		if (current.action === 'rollback') return await rollbackPanel(current);
 	}
-	if (current.action === 'deploy' || current.action === 'rollback') return await farmWorkflow(current);
+	if (current.action === 'deploy' && existsSync('/etc/cloudwiki/runtime.json')) {
+        let commit = current.detail?.commit as string | undefined;
+        if (!commit) { commit = (await checkUpdates('mediawiki')).commit; detail(current.id, { commit, runtime: 'native' }); }
+        const token = await installationToken();
+        const heartbeat = setInterval(() => {
+            saveState(db, 'deployment:heartbeat', now());
+            try {
+                const progress = JSON.parse(readFileSync('/var/lib/cloudwiki/deployment-progress.json', 'utf8'));
+                const summary = state<DeploymentSummary>(db, 'deployment:summary');
+                if (summary) saveState(db, 'deployment:summary', { ...summary, mediawiki: { ...summary.mediawiki, progress } });
+            } catch {}
+        }, 5000);
+        let output: string;
+        try { output = await run(['python3', '/usr/local/libexec/cloudwiki-native.py'], {
+            input: JSON.stringify({ action: 'deploy', commit }), env: { ...process.env, CLOUDWIKI_GITHUB_TOKEN: token },
+            id: current.id, label: 'Preparing and activating native production', timeout: 90 * 60 * 1000
+        }); } finally { clearInterval(heartbeat); }
+        const response = JSON.parse(output.trim().split('\n').at(-1)!);
+        if (!response.ok) throw new Error(response.message || 'Native deployment failed');
+        return response.result;
+    }
+    if (current.action === 'deploy' || current.action === 'rollback') return await farmWorkflow(current);
 	const token = current.action === 'publish_source' ? await installationToken() : undefined;
 	const result = await farm(current.action, { ...request, actor: current.actor }, token);
 	if (current.action === 'review_config' || current.action === 'review_source') {

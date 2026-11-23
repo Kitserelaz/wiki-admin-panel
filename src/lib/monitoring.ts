@@ -24,6 +24,7 @@ export type Service = {
 	target: string;
 	name: string;
 	kind: 'host' | 'container';
+	runtime?: 'docker' | 'native';
 	state: string;
 	detail?: string;
 	health: string | null;

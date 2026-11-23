@@ -7,11 +7,13 @@ import { promisify } from 'node:util';
 import type { HostSample, Service, ServiceSnapshot, Snapshot, Metrics, Operation } from '../src/lib/monitoring.ts';
 
 const execute = promisify(execFile);
-const units = ['docker.service', 'haproxy.service', 'wiki-admin-panel.service'];
+const config: { runtime?: 'docker' | 'native'; project: string; services: string[]; units?: string[] } = JSON.parse(readFileSync('/etc/cloudwiki-admin-agent.json', 'utf8'));
+const native = config.runtime === 'native';
+const units = native ? config.units || [] : ['docker.service', 'haproxy.service', 'wiki-admin-panel.service'];
 const socketPath = '/run/cloudwiki-admin-agent/agent.sock';
-const config: { project: string; services: string[] } = JSON.parse(readFileSync('/etc/cloudwiki-admin-agent.json', 'utf8'));
-if (config.project !== 'cloudwiki-production' || !config.services.length || !config.services.every((name) => /^[a-z][a-z0-9-]*$/.test(name))) {
-	throw new Error('Invalid production inventory');
+if (config.project !== 'cloudwiki-production' || (!native && !config.services.length) || !config.services.every((name) => /^[a-z][a-z0-9-]*$/.test(name)) ||
+    units.some((unit) => !/^(?:cloudwiki-[a-z0-9-]+|haproxy|wiki-admin-panel|docker)\.service$/.test(unit)) || (native && !units.length)) {
+    throw new Error('Invalid production inventory');
 }
 const targets = new Set([...units.map((unit) => `unit:${unit}`), ...config.services.map((name) => `container:${name}`)]);
 process.umask(0o077);
@@ -113,12 +115,13 @@ function memoryBytes(value: string): number | null {
 async function collectServices(): Promise<ServiceSnapshot> {
 	const errors: string[] = [];
 	const items = await Promise.all(units.map(async (unit): Promise<Service> => {
-		const item: Service = { target: `unit:${unit}`, name: unit, kind: 'host', state: 'unknown', health: null, uptimeSeconds: null, restarts: null, cpuPercent: null, memoryBytes: null, restartable: true };
+		const item: Service = { target: `unit:${unit}`, name: unit, kind: 'host', runtime: native ? 'native' : 'docker', state: 'unknown', health: null, uptimeSeconds: null, restarts: null, cpuPercent: null, memoryBytes: null, restartable: true };
 		try {
 			const output = await command(['systemctl', 'show', unit, '--property=ActiveState,SubState,NRestarts,MemoryCurrent,CPUUsageNSec,ActiveEnterTimestampMonotonic']);
 			const fields = Object.fromEntries(output.trim().split('\n').map((line) => line.split('=')));
 			item.state = fields.ActiveState || 'unknown';
 			item.detail = fields.SubState;
+			item.health = item.state === 'active' ? 'healthy' : item.state === 'failed' ? 'unhealthy' : null;
 			item.restarts = /^\d+$/.test(fields.NRestarts) ? Number(fields.NRestarts) : null;
 			item.memoryBytes = /^\d+$/.test(fields.MemoryCurrent) && fields.MemoryCurrent !== '18446744073709551615' ? Number(fields.MemoryCurrent) : null;
 			if (/^\d+$/.test(fields.CPUUsageNSec) && fields.CPUUsageNSec !== '18446744073709551615') {
@@ -133,6 +136,13 @@ async function collectServices(): Promise<ServiceSnapshot> {
 		} catch { errors.push(`${unit} status unavailable`); }
 		return item;
 	}));
+    if (native) {
+        try {
+            const health = JSON.parse(readFileSync('/var/lib/cloudwiki-native/health.json', 'utf8'));
+            for (const item of items) if (health.services[item.name] && item.state === 'active') item.health = seconds() - health.collectedAt < 90 ? health.services[item.name] : 'unknown';
+        } catch { errors.push('Native application health is unavailable'); }
+        return { collectedAt: seconds(), items, errors };
+    }
 	let discovered: Container[] | null = null;
 	const stats = new Map<string, { CPUPerc: string; MemUsage: string }>();
 	try { discovered = await containers(); } catch (cause) {

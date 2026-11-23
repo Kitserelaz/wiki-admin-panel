@@ -11,17 +11,23 @@ chmod 644 /usr/local/libexec/cloudwiki-admin-agent.js
 python3 - <<'PY'
 import json, os, subprocess, tempfile
 from pathlib import Path
-result = subprocess.run(['python3', 'scripts/compose', '--env-file', '/var/www/.env.production', 'config', '--format', 'json'], cwd='/var/www', capture_output=True, text=True, check=True)
-config = json.loads(result.stdout)
-if config.get('name') != 'cloudwiki-production':
-    raise SystemExit('Unexpected Compose project')
-services = sorted(name for name, service in config['services'].items() if not service.get('profiles'))
-if not services:
-    raise SystemExit('Production inventory is empty')
+native = Path('/etc/cloudwiki/runtime.json')
+if native.exists():
+    manifest = json.loads(native.read_text())
+    inventory = {'runtime': 'native', 'project': 'cloudwiki-production', 'services': [], 'units': ['haproxy.service', 'wiki-admin-panel.service', *[name + '.service' for name in manifest['units']]]}
+else:
+    result = subprocess.run(['python3', 'scripts/compose', '--env-file', '/var/www/.env.production', 'config', '--format', 'json'], cwd='/var/www', capture_output=True, text=True, check=True)
+    config = json.loads(result.stdout)
+    if config.get('name') != 'cloudwiki-production':
+        raise SystemExit('Unexpected Compose project')
+    services = sorted(name for name, service in config['services'].items() if not service.get('profiles'))
+    if not services:
+        raise SystemExit('Production inventory is empty')
+    inventory = {'runtime': 'docker', 'project': config['name'], 'services': services}
 fd, temporary = tempfile.mkstemp(prefix='.cloudwiki-agent-', dir='/etc')
 try:
     with os.fdopen(fd, 'w') as output:
-        json.dump({'project': 'cloudwiki-production', 'services': services}, output)
+        json.dump(inventory, output)
         output.write('\n')
     os.chmod(temporary, 0o600)
     os.replace(temporary, '/etc/cloudwiki-admin-agent.json')

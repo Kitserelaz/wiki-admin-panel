@@ -33,7 +33,7 @@
 		? summary?.panel.commit === update.commit
 		: update.artifact === 'dashboard-manifest'
 			? summary?.mediawiki.dashboardCommit === update.commit
-			: summary?.mediawiki.sourceCommit === update.commit && summary?.mediawiki.lastSuccess === update.commit && ['php', 'web', 'counter'].every((service) => summary?.mediawiki.images?.[service] === update.commit)));
+			: summary?.mediawiki.lastSuccess === update.commit && (summary?.mediawiki.runtime === 'native' || ['php', 'web', 'counter'].every((service) => summary?.mediawiki.images?.[service] === update.commit))));
 	let selectedPaths = $derived(review?.files.filter((file) => selectedFiles.includes(file.id)).map((file) => file.path) || []);
 	$effect(() => {
 		if (confirmation && dialog && !dialog.open) dialog.showModal();
@@ -91,16 +91,19 @@
 		selectedFiles = selectedFiles.includes(id) ? selectedFiles.filter((value) => value !== id) : [...selectedFiles, id];
 	}
 	function selectAll() { selectedFiles = review?.files.filter((file) => file.actionable !== false).map((file) => file.id) || []; }
-	function deploy() {
-		if (!update) return;
-		confirm({ application, action: 'deploy', commit: update.commit }, `Deploy ${application === 'panel' ? 'panel' : 'MediaWiki'} ${short(update.commit)}?`, application === 'panel'
-			? 'The current panel stays online while the build runs. Activation restarts the panel and ends all panel sessions. Sign in again to see the result.'
-			: 'The existing GitHub production workflow will deploy this exact CI release. The farm will enter maintenance while it takes a recovery snapshot and runs migrations.');
-	}
+	async function deploy() {
+        if (submitting) return;
+        submitting = true;
+        failure = '';
+        try { await send({ application, action: 'deploy' }, crypto.randomUUID()); }
+        catch (cause) { failure = cause instanceof Error ? cause.message : 'Deployment could not be submitted'; }
+        finally { submitting = false; }
+    }
+
 	function rollback(release: Release) {
 		confirm({ application, action: 'rollback', release: release.id }, `Roll back to ${short(release.commit)}?`, application === 'panel'
 			? 'This activates the retained build without rebuilding. The panel restarts and all operators must sign in again.'
-			: 'This requests a compatible application rollback through the existing production workflow. Current database contents and data volumes are preserved. The farm will have a maintenance interruption.');
+			: 'This requests a recorded compatible application rollback. Current database contents and data volumes are preserved. The farm will have a maintenance interruption.');
 	}
 	function resolve(action: DeploymentRequest['action']) {
 		if (!review) return;
@@ -109,14 +112,14 @@
 			accept_config: ['Accept selected configuration changes?', 'The selected current fingerprints will become approved. Remaining configuration drift continues to block deployment.'],
 			initialize_baseline: ['Initialize the configuration baseline?', 'This approves the complete current configuration inventory. Review every listed file before confirming.'],
 			restore_baseline: ['Restore the selected baseline backup?', 'The previous baseline will be saved. Any differences from the restored baseline remain visible as configuration drift.'],
-			publish_source: ['Publish selected live edits to main?', 'This commits and pushes the selected contents to the MediaWiki main branch. The push triggers existing CI and automatic deployment. Unselected edits remain in production.'],
+			publish_source: ['Publish selected live edits to main?', 'This commits and pushes the selected contents to the MediaWiki main branch. The push updates main; use Deploy to activate it. Unselected edits remain in production.'],
 			discard_source: ['Archive and discard selected edits?', 'A root-only recovery archive will be retained for 30 days. Selected tracked files will be restored to production HEAD and selected untracked files removed. The live editor is paused during the operation.']
 		};
 		const [title, description] = descriptions[action];
 		confirm(request, title, description);
 	}
 	function reconcile(operation: DeploymentJob) {
-		confirm({ ...operation.request }, 'Reconcile the source publication?', 'The worker will inspect the saved publication and complete it without creating a duplicate commit. A completed push can trigger existing CI and automatic deployment. Changed source files require a fresh review.');
+		confirm({ ...operation.request }, 'Reconcile the source publication?', 'The worker will inspect the saved publication and complete it without creating a duplicate commit. A completed push updates main; deployment is started separately. Changed source files require a fresh review.');
 	}
 	function short(value: string | null | undefined) { return value ? value.slice(0, 12) : 'Unknown'; }
 	onMount(() => pollVisible(async (signal) => {
@@ -171,12 +174,13 @@
 			{:else}
 				<p class="commit"><a href={`https://github.com/Kitserelaz/${application === 'panel' ? 'wiki-admin-panel' : 'mediawiki-www'}/commit/${update.commit}`} target="_blank" rel="noreferrer">{short(update.commit)}</a></p>
 				<p>{update.message}</p>
-				{#if application === 'mediawiki'}<p class="muted small">{update.ciReady ? 'CI release ready' : 'Waiting for a successful CI release'}</p>{/if}
-				<button disabled={!ready || blocked || (application === 'mediawiki' && (!summary?.githubConfigured || !update.ciReady))} onclick={deploy}>Deploy</button>
+				{#if application === 'mediawiki'}<p class="muted small">Deploy prepares the latest main commit on this server. CI does not gate deployment.</p>{/if}
+
 			{/if}
 			<p class="muted small">Checked {time(update.checkedAt)}</p>
 			{#if update.error}<p class="notice">{update.error}</p>{/if}
-		{:else}<p class="muted small">Not checked yet</p>{/if}
+		{:else}<p class="muted small">Deploy resolves the latest main commit automatically.</p>{/if}
+        <button disabled={!ready || blocked || submitting || (application === 'mediawiki' && !summary?.githubConfigured)} onclick={deploy}>{submitting ? 'Submitting…' : 'Deploy'}</button>
 	</section>
 </div>
 

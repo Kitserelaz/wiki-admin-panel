@@ -10,7 +10,7 @@ export type DeploymentSummary = {
 	collectedAt: number;
 	githubConfigured: boolean;
 	panel: { commit: string | null; releases: Release[]; error?: string };
-	mediawiki: { sourceCommit?: string; sourceEdits?: number; lastSuccess?: string | null; dashboardCommit?: string | null; images?: Record<string, string>; configuration?: { status: string; files: ReviewedFile[]; message?: string }; releases?: Release[]; error?: string; progress?: { status: string; stage: string; commit: string; reason?: string } };
+	mediawiki: { runtime?: 'docker' | 'native'; sourceCommit?: string; sourceEdits?: number; lastSuccess?: string | null; dashboardCommit?: string | null; images?: Record<string, string>; configuration?: { status: string; files: ReviewedFile[]; message?: string }; releases?: Release[]; error?: string; progress?: { status: string; stage: string; commit: string; reason?: string } };
 	updates: Partial<Record<Application, Update>>;
 	jobs: DeploymentJob[];
 	workerActive: boolean;

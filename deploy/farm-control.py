@@ -71,6 +71,11 @@ def private_write(path, value):
 
 
 def guard_module():
+    if Path('/etc/cloudwiki/runtime.json').exists():
+        spec = importlib.util.spec_from_file_location('native_guard', '/usr/local/libexec/cloudwiki-native.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
     spec = importlib.util.spec_from_file_location('farm_guard', '/usr/local/libexec/cloudwiki-deploy-production.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -299,6 +304,14 @@ def verify_source(review):
 
 @contextlib.contextmanager
 def pause_editor():
+    if Path('/etc/cloudwiki/runtime.json').exists():
+        state = subprocess.run(['systemctl', 'is-active', '--quiet', 'cloudwiki-editor.service']).returncode == 0
+        try:
+            if state: run(['systemctl', 'stop', 'cloudwiki-editor.service'])
+            yield
+        finally:
+            if state: run(['systemctl', 'start', 'cloudwiki-editor.service'])
+        return
     containers = run(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=cloudwiki-production', '--filter', 'label=com.docker.compose.service=code']).decode().split()
     try:
         if containers:
@@ -465,6 +478,10 @@ def rollback_problem(record, settings, source_commit, guard):
 
 
 def overview():
+    if Path('/etc/cloudwiki/runtime.json').exists():
+        result = guard_module().overview()
+        result['sourceEdits'] = len(source_state()['files'])
+        return result
     result = {'sourceCommit': git('rev-parse', 'HEAD').decode().strip(), 'sourceEdits': 0,
               'configuration': {'status': 'unavailable', 'files': []}, 'releases': [], 'images': {}}
     result['sourceEdits'] = len(source_state()['files'])
