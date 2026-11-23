@@ -46,7 +46,8 @@ function privateJson(path: string, value: unknown) {
 async function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string; timeout?: number; id?: string; label?: string } = {}) {
 	if (options.id && options.label) log(options.id, `\n${options.label}\n`);
 	return await new Promise<string>((resolve, reject) => {
-		const child = spawn(args[0], args.slice(1), { cwd: options.cwd, env: options.env || process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+		const invocation = args[0] === 'systemd-run' && options.cwd ? [args[0], '--working-directory=' + options.cwd, ...args.slice(1)] : args;
+		const child = spawn(invocation[0], invocation.slice(1), { cwd: options.cwd, env: options.env || process.env, stdio: ['pipe', 'pipe', 'pipe'] });
 		let stdout = '', stderr = '', lines = '';
 		let timedOut = false;
 		const stream = (text: string) => {
